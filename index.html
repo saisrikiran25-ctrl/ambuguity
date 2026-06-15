@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spec Ambiguity Detector — AI-Powered Requirements Quality Automation</title>
+  <meta name="description" content="An AI-powered n8n workflow that reviews PRDs, feature specs, and requirement documents to detect ambiguity before development starts. Structured diagnostic, not a summarizer." />
+  <meta name="keywords" content="spec ambiguity detector, PRD review, requirements quality, n8n workflow, AI automation, product management" />
+  <meta property="og:title" content="Spec Ambiguity Detector" />
+  <meta property="og:description" content="Turns vague specs into executable clarity by detecting ambiguity before development starts." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-base:      #09090f;
+      --bg-surface:   #0f0f1a;
+      --bg-card:      #13131f;
+      --bg-hover:     #1a1a2e;
+      --border:       rgba(255,255,255,0.07);
+      --border-glow:  rgba(139,92,246,0.35);
+      --accent:       #8b5cf6;
+      --accent-light: #a78bfa;
+      --accent-dim:   rgba(139,92,246,0.15);
+      --cyan:         #22d3ee;
+      --cyan-dim:     rgba(34,211,238,0.12);
+      --emerald:      #34d399;
+      --rose:         #fb7185;
+      --amber:        #fbbf24;
+      --text-primary: #f1f0ff;
+      --text-secondary: #9490b5;
+      --text-muted:   #5a5680;
+      --radius:       14px;
+      --radius-sm:    8px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── NOISE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.4;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 clamp(1.5rem, 5vw, 4rem);
+      height: 64px;
+      background: rgba(9,9,15,0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 0.95rem; color: var(--text-primary);
+      text-decoration: none;
+    }
+    .nav-logo-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+    .nav-links { display: flex; align-items: center; gap: 2rem; }
+    .nav-links a {
+      color: var(--text-secondary); text-decoration: none;
+      font-size: 0.875rem; font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+    .nav-cta {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent); color: #fff;
+      padding: 0.5rem 1.1rem; border-radius: 8px;
+      font-size: 0.875rem; font-weight: 600;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+    }
+    .nav-cta:hover {
+      background: var(--accent-light);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(139,92,246,0.4);
+    }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center;
+      padding: 8rem clamp(1.5rem, 5vw, 4rem) 6rem;
+      position: relative;
+    }
+    .hero-glow {
+      position: absolute;
+      top: 15%; left: 50%; transform: translateX(-50%);
+      width: 900px; height: 600px;
+      background: radial-gradient(ellipse at center,
+        rgba(139,92,246,0.18) 0%,
+        rgba(34,211,238,0.08) 40%,
+        transparent 70%);
+      filter: blur(60px);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent-dim);
+      border: 1px solid var(--border-glow);
+      color: var(--accent-light);
+      padding: 0.35rem 1rem; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 600;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      margin-bottom: 2rem;
+      animation: fadeUp 0.6s ease both;
+    }
+    .badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent-light);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 5rem);
+      font-weight: 900;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      max-width: 820px;
+      animation: fadeUp 0.7s 0.1s ease both;
+    }
+    .hero h1 .grad {
+      background: linear-gradient(135deg, var(--accent-light) 0%, var(--cyan) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      margin-top: 1.5rem;
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      color: var(--text-secondary);
+      max-width: 620px;
+      line-height: 1.7;
+      animation: fadeUp 0.7s 0.2s ease both;
+    }
+    .hero-actions {
+      display: flex; align-items: center; gap: 1rem;
+      flex-wrap: wrap; justify-content: center;
+      margin-top: 2.5rem;
+      animation: fadeUp 0.7s 0.3s ease both;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: linear-gradient(135deg, var(--accent), #6d28d9);
+      color: #fff; padding: 0.85rem 2rem;
+      border-radius: var(--radius-sm); font-weight: 700;
+      font-size: 1rem; text-decoration: none;
+      box-shadow: 0 4px 24px rgba(139,92,246,0.4);
+      transition: transform 0.15s, box-shadow 0.2s;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 40px rgba(139,92,246,0.55);
+    }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      padding: 0.85rem 1.75rem;
+      border-radius: var(--radius-sm); font-weight: 600;
+      font-size: 1rem; text-decoration: none;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+    }
+    .btn-secondary:hover {
+      border-color: var(--border-glow);
+      color: var(--text-primary);
+      background: var(--accent-dim);
+    }
+    .hero-stat-row {
+      display: flex; align-items: center; gap: 2.5rem;
+      flex-wrap: wrap; justify-content: center;
+      margin-top: 3.5rem;
+      animation: fadeUp 0.7s 0.4s ease both;
+    }
+    .hero-stat { text-align: center; }
+    .hero-stat-val {
+      font-size: 1.9rem; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent-light), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-stat-label { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; font-weight: 500; }
+    .hero-divider { width: 1px; height: 36px; background: var(--border); }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── SECTIONS ── */
+    section {
+      padding: 6rem clamp(1.5rem, 5vw, 4rem);
+      max-width: 1200px; margin: 0 auto;
+      position: relative; z-index: 1;
+    }
+    .section-label {
+      display: inline-block;
+      font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 1rem;
+    }
+    .section-title {
+      font-size: clamp(1.75rem, 4vw, 2.6rem);
+      font-weight: 800; letter-spacing: -0.02em;
+      line-height: 1.15; margin-bottom: 1rem;
+    }
+    .section-sub {
+      color: var(--text-secondary); font-size: 1.05rem;
+      max-width: 560px; line-height: 1.7;
+    }
+
+    /* ── PROBLEM STRIP ── */
+    .problem-strip {
+      width: 100%; background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 3rem clamp(1.5rem, 5vw, 4rem);
+      text-align: center;
+    }
+    .problem-strip p {
+      max-width: 700px; margin: 0 auto;
+      font-size: clamp(1.05rem, 2.5vw, 1.3rem);
+      color: var(--text-secondary); line-height: 1.8;
+    }
+    .problem-strip strong { color: var(--text-primary); }
+
+    /* ── CATEGORIES GRID ── */
+    .categories-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-top: 3rem;
+    }
+    .cat-card {
+      background: var(--bg-card);
+      padding: 1.6rem 1.75rem;
+      display: flex; flex-direction: column; gap: 0.6rem;
+      transition: background 0.2s;
+      cursor: default;
+    }
+    .cat-card:hover { background: var(--bg-hover); }
+    .cat-icon {
+      font-size: 1.4rem; line-height: 1;
+      margin-bottom: 0.25rem;
+    }
+    .cat-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem; font-weight: 500;
+      color: var(--accent-light); letter-spacing: 0.02em;
+    }
+    .cat-desc {
+      font-size: 0.875rem; color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    /* ── FLOW ── */
+    .flow-wrap {
+      margin-top: 3rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .flow-header {
+      padding: 0.75rem 1.25rem;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .flow-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .flow-body {
+      padding: 2rem 2rem 2rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      line-height: 1.9;
+      overflow-x: auto;
+    }
+    .flow-body .kw { color: var(--accent-light); }
+    .flow-body .br { color: var(--cyan); }
+    .flow-body .note { color: var(--text-muted); }
+    .flow-body .warn { color: var(--amber); }
+    .flow-body .ok { color: var(--emerald); }
+
+    /* ── IS / IS NOT ── */
+    .isnot-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-top: 3rem;
+    }
+    @media (max-width: 640px) { .isnot-grid { grid-template-columns: 1fr; } }
+    .isnot-box {
+      border-radius: var(--radius);
+      padding: 2rem;
+      border: 1px solid var(--border);
+    }
+    .isnot-is { background: rgba(52, 211, 153, 0.06); border-color: rgba(52,211,153,0.2); }
+    .isnot-not { background: rgba(251,113,133,0.05); border-color: rgba(251,113,133,0.18); }
+    .isnot-heading {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; margin-bottom: 1.25rem;
+    }
+    .isnot-is .isnot-heading { color: var(--emerald); }
+    .isnot-not .isnot-heading { color: var(--rose); }
+    .isnot-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 0.9rem; color: var(--text-secondary);
+      margin-bottom: 0.75rem;
+    }
+    .isnot-item:last-child { margin-bottom: 0; }
+    .isnot-icon { flex-shrink: 0; margin-top: 1px; }
+
+    /* ── EXAMPLE OUTPUT ── */
+    .output-wrap {
+      margin-top: 3rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-header {
+      padding: 0.75rem 1.25rem;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .output-header-left { display: flex; align-items: center; gap: 8px; }
+    .output-header span {
+      font-size: 0.78rem; color: var(--text-muted); font-weight: 500;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .severity-badge {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 0.2rem 0.65rem;
+      border-radius: 999px;
+    }
+    .sev-high { background: rgba(251,113,133,0.15); color: var(--rose); border: 1px solid rgba(251,113,133,0.3); }
+    .output-body {
+      padding: 1.75rem 2rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem; line-height: 1.9;
+      color: var(--text-secondary);
+      overflow-x: auto;
+    }
+    .json-key { color: var(--accent-light); }
+    .json-str { color: var(--cyan); }
+    .json-arr { color: var(--emerald); }
+    .json-bool { color: var(--amber); }
+    .json-null { color: var(--text-muted); }
+
+    /* ── WHO FOR ── */
+    .audience-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-top: 3rem;
+    }
+    .audience-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      transition: border-color 0.2s, transform 0.15s;
+    }
+    .audience-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+    .audience-emoji { font-size: 1.8rem; margin-bottom: 0.75rem; }
+    .audience-role { font-size: 0.9rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.4rem; }
+    .audience-why { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.55; }
+
+    /* ── REPO FILES ── */
+    .files-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 0.75rem;
+      margin-top: 3rem;
+    }
+    .file-row {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.9rem 1rem;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .file-row:hover { border-color: var(--border-glow); background: var(--bg-hover); }
+    .file-icon { font-size: 1rem; flex-shrink: 0; }
+    .file-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem; color: var(--accent-light); font-weight: 500;
+    }
+    .file-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 1px; }
+
+    /* ── CTA SECTION ── */
+    .cta-section {
+      text-align: center;
+      padding: 7rem clamp(1.5rem, 5vw, 4rem);
+      position: relative;
+    }
+    .cta-glow {
+      position: absolute;
+      bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 700px; height: 400px;
+      background: radial-gradient(ellipse at center,
+        rgba(139,92,246,0.2) 0%, transparent 65%);
+      filter: blur(50px);
+      pointer-events: none;
+    }
+    .cta-section h2 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 900; letter-spacing: -0.025em;
+      line-height: 1.1; margin-bottom: 1.25rem;
+    }
+    .cta-section p {
+      color: var(--text-secondary); max-width: 520px;
+      margin: 0 auto 2.5rem; font-size: 1.05rem; line-height: 1.7;
+    }
+    .cta-actions {
+      display: flex; gap: 1rem;
+      justify-content: center; flex-wrap: wrap;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem clamp(1.5rem, 5vw, 4rem);
+      display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .footer-left {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 0.875rem; color: var(--text-muted);
+    }
+    .footer-left strong { color: var(--text-secondary); }
+    .footer-right { display: flex; gap: 1.5rem; }
+    .footer-right a {
+      font-size: 0.825rem; color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-right a:hover { color: var(--text-secondary); }
+
+    /* ── SCROLL REVEAL ── */
+    .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .isnot-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-logo" href="#">
+    <div class="nav-logo-dot"></div>
+    Spec Ambiguity Detector
+  </a>
+  <div class="nav-links">
+    <a href="#how-it-works">How it works</a>
+    <a href="#categories">Categories</a>
+    <a href="#output">Output</a>
+    <a href="#files">Files</a>
+  </div>
+  <a class="nav-cta" id="nav-github-btn" href="https://github.com/saisrikiran25-ctrl/ambuguity" target="_blank" rel="noopener">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+    View on GitHub
+  </a>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-glow"></div>
+  <div class="badge"><div class="badge-dot"></div> Day 20 · Public Automation Series</div>
+  <h1>Detect <span class="grad">spec ambiguity</span><br/>before dev starts</h1>
+  <p class="hero-sub">
+    An AI-powered n8n workflow that reviews PRDs, feature specs, and requirement
+    documents — returning a structured ambiguity diagnostic, not a summary,
+    not a rewrite.
+  </p>
+  <div class="hero-actions">
+    <a class="btn-primary" id="hero-github-btn" href="https://github.com/saisrikiran25-ctrl/ambuguity" target="_blank" rel="noopener">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      Get the Workflow
+    </a>
+    <a class="btn-secondary" href="#how-it-works">
+      How it works
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+  <div class="hero-stat-row">
+    <div class="hero-stat">
+      <div class="hero-stat-val">10</div>
+      <div class="hero-stat-label">Ambiguity categories</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <div class="hero-stat-val">18</div>
+      <div class="hero-stat-label">Workflow nodes</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <div class="hero-stat-val">2</div>
+      <div class="hero-stat-label">Analysis modes</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <div class="hero-stat-val">0</div>
+      <div class="hero-stat-label">Hardcoded secrets</div>
+    </div>
+  </div>
+</div>
+
+<!-- PROBLEM STRIP -->
+<div class="problem-strip">
+  <p>
+    <strong>Most product failures don't begin in code.</strong> They begin in interpretation.
+    If two capable people can read the same requirement and imagine different outcomes,
+    the spec already contains delivery risk. This product moves that conversation <strong>before engineering breakdown.</strong>
+  </p>
+</div>
+
+<!-- HOW IT WORKS -->
+<section id="how-it-works">
+  <div class="reveal">
+    <div class="section-label">Architecture</div>
+    <h2 class="section-title">Two layers. Deterministic first, AI second.</h2>
+    <p class="section-sub">The workflow runs rule-based ambiguity detection before any AI call. Low-signal documents are short-circuited without wasting tokens.</p>
+  </div>
+  <div class="flow-wrap reveal">
+    <div class="flow-header">
+      <div class="flow-dot" style="background:#fb7185"></div>
+      <div class="flow-dot" style="background:#fbbf24"></div>
+      <div class="flow-dot" style="background:#34d399"></div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--text-muted);margin-left:8px">spec-ambiguity-detector.json — node flow</span>
+    </div>
+    <div class="flow-body">
+<span class="kw">Webhook</span><br/>
+&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Provider Config</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Normalize Spec Input</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Extract Structural Signals</span> &nbsp;<span class="note">← no AI</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Detect Deterministic Ambiguity Flags</span> &nbsp;<span class="note">← no AI, vague term scan</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Validate Signal Strength</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">├─▶</span> <span class="warn">[Low Signal]</span> → <span class="kw">Low Signal Response</span> &nbsp;<span class="note">← skips AI entirely</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="ok">[Valid]</span> → <span class="kw">Prep Spec Analysis Request</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">AI: Analyze Spec Ambiguity</span> &nbsp;<span class="note">← AI call here</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Parse Spec Analysis</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Deterministic Quality Checks</span> &nbsp;<span class="note">← post-AI validation</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Human Review Override</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">├─▶</span> <span class="warn">[portfolio]</span> → <span class="kw">AI: Portfolio Review</span> &nbsp;<span class="note">← second AI call</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="ok">[single]</span> → <span class="kw">Final Response</span> &nbsp;<span class="note">← strips _debug_ fields</span><br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="br">└─▶</span> <span class="kw">Respond to Webhook</span>
+    </div>
+  </div>
+</section>
+
+<!-- CATEGORIES -->
+<section id="categories" style="background:var(--bg-surface);max-width:100%;padding-left:0;padding-right:0;">
+  <div style="max-width:1200px;margin:0 auto;padding:0 clamp(1.5rem,5vw,4rem);">
+    <div class="reveal">
+      <div class="section-label">Pattern Classification</div>
+      <h2 class="section-title">10 canonical ambiguity categories</h2>
+      <p class="section-sub">Every ambiguity finding is classified into one of these named, enumerated categories — consistent across prompts, schemas, and workflow code.</p>
+    </div>
+    <div class="categories-grid reveal">
+      <div class="cat-card">
+        <div class="cat-icon">🌫️</div>
+        <div class="cat-name">vague_language</div>
+        <div class="cat-desc">Terms like "fast," "robust," "seamless," or "intuitive" without measurable criteria.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">🎯</div>
+        <div class="cat-name">missing_acceptance_criteria</div>
+        <div class="cat-desc">Requirements with no verifiable success conditions. If you can't test it, it doesn't count.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">👤</div>
+        <div class="cat-name">undefined_ownership</div>
+        <div class="cat-desc">No named role, team, squad, or service assigned to a requirement, decision, or edge case.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">❓</div>
+        <div class="cat-name">missing_decision_point</div>
+        <div class="cat-desc">Feature direction described without documenting the unresolved choices or tradeoffs still open.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">🗺️</div>
+        <div class="cat-name">scope_boundary_gap</div>
+        <div class="cat-desc">No definition of what is excluded, deferred, or out of scope for this release.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">🔗</div>
+        <div class="cat-name">dependency_blind_spot</div>
+        <div class="cat-desc">Quiet reliance on external APIs, legal review, design assets, or approvals without naming them.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">🧪</div>
+        <div class="cat-name">untestable_requirement</div>
+        <div class="cat-desc">Requirements stated as intent or feeling rather than observable, measurable behavior.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">⚡</div>
+        <div class="cat-name">contradictory_requirement</div>
+        <div class="cat-desc">Two or more statements in the document that cannot both be true or that conflict on scope.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">🏗️</div>
+        <div class="cat-name">assumption_without_validation</div>
+        <div class="cat-desc">Unvalidated premises presented as established facts — market assumptions, user behaviors, system capabilities.</div>
+      </div>
+      <div class="cat-card">
+        <div class="cat-icon">📄</div>
+        <div class="cat-name">low_signal_noise</div>
+        <div class="cat-desc">Document too short or abstract for reliable analysis. Short-circuits before AI call.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- IS / IS NOT -->
+<section>
+  <div class="reveal">
+    <div class="section-label">Positioning</div>
+    <h2 class="section-title">What this is and what it is not</h2>
+    <p class="section-sub">The product has a narrow, specific purpose. It is not a general AI tool, a summarizer, or a spec writer.</p>
+  </div>
+  <div class="isnot-grid reveal">
+    <div class="isnot-box isnot-is">
+      <div class="isnot-heading">✓ This is</div>
+      <div class="isnot-item"><span class="isnot-icon">✓</span><span>A requirements-quality diagnostic tool</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✓</span><span>An ambiguity pattern classifier with 10 named categories</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✓</span><span>A structured diagnostic you can route to Slack, Notion, or Jira</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✓</span><span>A pre-build audit automation with portfolio review mode</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✓</span><span>Deterministic + AI, with hallucination checks on the AI output</span></div>
+    </div>
+    <div class="isnot-box isnot-not">
+      <div class="isnot-heading">✗ This is not</div>
+      <div class="isnot-item"><span class="isnot-icon">✗</span><span>A spec writer or content generator</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✗</span><span>A document summarizer or compressor</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✗</span><span>A project management or ticketing tool</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✗</span><span>A legal or compliance reviewer</span></div>
+      <div class="isnot-item"><span class="isnot-icon">✗</span><span>A replacement for product judgment</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- EXAMPLE OUTPUT -->
+<section id="output" style="background:var(--bg-surface);max-width:100%;padding-left:0;padding-right:0;">
+  <div style="max-width:1200px;margin:0 auto;padding:0 clamp(1.5rem,5vw,4rem);">
+    <div class="reveal">
+      <div class="section-label">Example Output</div>
+      <h2 class="section-title">Structured diagnostic, not prose advice</h2>
+      <p class="section-sub">Every field is named, typed, and designed to be routed downstream. No "improve clarity" — only specific, actionable findings.</p>
+    </div>
+    <div class="output-wrap reveal">
+      <div class="output-header">
+        <div class="output-header-left">
+          <div class="flow-dot" style="background:#fb7185"></div>
+          <div class="flow-dot" style="background:#fbbf24"></div>
+          <div class="flow-dot" style="background:#34d399"></div>
+          <span style="margin-left:8px">diagnostic response — Smart Notification Center v1 PRD</span>
+        </div>
+        <span class="severity-badge sev-high">severity: high</span>
+      </div>
+      <div class="output-body">
+<span class="json-key">"ambiguity_summary"</span>: <span class="json-str">"This document contains four distinct ambiguity patterns across vague language, missing acceptance criteria, undefined ownership, and scope boundary gaps. The terms 'fast', 'intuitive', 'seamless', and 'robust' appear without measurable criteria. Notification delivery ownership is unassigned across three requirements. No acceptance criteria are defined for any stated requirement."</span>,<br/><br/>
+<span class="json-key">"ambiguity_categories"</span>: <span class="json-arr">["vague_language", "missing_acceptance_criteria", "undefined_ownership", "scope_boundary_gap"]</span>,<br/><br/>
+<span class="json-key">"vague_terms_detected"</span>: <span class="json-arr">["fast", "intuitive", "seamless", "robust", "high volumes"]</span>,<br/><br/>
+<span class="json-key">"undefined_ownership_flags"</span>: <span class="json-arr">["'The backend team will handle delivery' — no squad, service, or individual named", "'Edge cases will be supported' — no owner for definition or implementation"]</span>,<br/><br/>
+<span class="json-key">"recommended_clarifications"</span>: <span class="json-arr">["Define the exact latency threshold for 'fast' notification loading (e.g., p95 &lt; 800ms)", "Assign explicit ownership for notification delivery infrastructure — name the squad and service", "List the edge cases in scope for v1 and explicitly exclude the remainder"]</span>,<br/><br/>
+<span class="json-key">"recommended_next_step"</span>: <span class="json-str">"Return this spec to the author with the five clarification items above before engineering breakdown — the document is not implementation-ready."</span>,<br/><br/>
+<span class="json-key">"confidence_band"</span>: <span class="json-str">"high"</span>,&nbsp;
+<span class="json-key">"needs_human_review"</span>: <span class="json-bool">false</span>,&nbsp;
+<span class="json-key">"review_reason"</span>: <span class="json-null">null</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WHO IT'S FOR -->
+<section>
+  <div class="reveal">
+    <div class="section-label">Audience</div>
+    <h2 class="section-title">Who benefits from this</h2>
+    <p class="section-sub">Anyone who touches a spec before engineering starts.</p>
+  </div>
+  <div class="audience-grid reveal">
+    <div class="audience-card">
+      <div class="audience-emoji">📋</div>
+      <div class="audience-role">Product Managers</div>
+      <div class="audience-why">Catch weak requirements before engineering handoff. PRDs are the source of truth — ambiguity here is expensive.</div>
+    </div>
+    <div class="audience-card">
+      <div class="audience-emoji">⚙️</div>
+      <div class="audience-role">Engineers</div>
+      <div class="audience-why">Get clearer implementation inputs and fewer assumption-driven builds. Know what you're building before you build it.</div>
+    </div>
+    <div class="audience-card">
+      <div class="audience-emoji">🎨</div>
+      <div class="audience-role">Designers</div>
+      <div class="audience-why">Surface missing flow logic, edge cases, and interaction assumptions before they become late-stage surprises.</div>
+    </div>
+    <div class="audience-card">
+      <div class="audience-emoji">🧪</div>
+      <div class="audience-role">QA Engineers</div>
+      <div class="audience-why">Get testable acceptance criteria instead of broad intent statements. Write tests against requirements, not assumptions.</div>
+    </div>
+    <div class="audience-card">
+      <div class="audience-emoji">🚀</div>
+      <div class="audience-role">Founders &amp; Small Teams</div>
+      <div class="audience-why">Move fast without skipping clarity. Surfacing open questions and assumptions early is how fast teams stay aligned.</div>
+    </div>
+  </div>
+</section>
+
+<!-- REPO FILES -->
+<section id="files" style="background:var(--bg-surface);max-width:100%;padding-left:0;padding-right:0;">
+  <div style="max-width:1200px;margin:0 auto;padding:0 clamp(1.5rem,5vw,4rem);">
+    <div class="reveal">
+      <div class="section-label">Repository</div>
+      <h2 class="section-title">14 production-ready files</h2>
+      <p class="section-sub">No stubs. No placeholders. Every file contains meaningful, production-quality content.</p>
+    </div>
+    <div class="files-grid reveal">
+      <div class="file-row"><div class="file-icon">📄</div><div><div class="file-name">README.md</div><div class="file-desc">Full product docs, examples, tables</div></div></div>
+      <div class="file-row"><div class="file-icon">⚙️</div><div><div class="file-name">workflow/spec-ambiguity-detector.json</div><div class="file-desc">18-node importable n8n workflow</div></div></div>
+      <div class="file-row"><div class="file-icon">🧠</div><div><div class="file-name">prompts/system-spec-analysis.md</div><div class="file-desc">Master system prompt with full output contract</div></div></div>
+      <div class="file-row"><div class="file-icon">📝</div><div><div class="file-name">prompts/user-spec-analysis-template.md</div><div class="file-desc">Runtime interpolation template (11 placeholders)</div></div></div>
+      <div class="file-row"><div class="file-icon">🧠</div><div><div class="file-name">prompts/system-portfolio-review.md</div><div class="file-desc">Portfolio-level cross-doc analysis prompt</div></div></div>
+      <div class="file-row"><div class="file-icon">📝</div><div><div class="file-name">prompts/user-portfolio-review-template.md</div><div class="file-desc">Runtime template for portfolio review</div></div></div>
+      <div class="file-row"><div class="file-icon">📐</div><div><div class="file-name">schemas/spec-analysis-output-schema.json</div><div class="file-desc">JSON Schema draft-07, 17 required fields</div></div></div>
+      <div class="file-row"><div class="file-icon">📐</div><div><div class="file-name">schemas/portfolio-review-output-schema.json</div><div class="file-desc">JSON Schema draft-07 for portfolio output</div></div></div>
+      <div class="file-row"><div class="file-icon">📦</div><div><div class="file-name">schemas/spec-input-payload-example.json</div><div class="file-desc">Realistic webhook input payload example</div></div></div>
+      <div class="file-row"><div class="file-icon">🏗️</div><div><div class="file-name">assets/architecture-overview.md</div><div class="file-desc">Stage-by-stage node architecture guide</div></div></div>
+      <div class="file-row"><div class="file-icon">🛠️</div><div><div class="file-name">docs/setup-guide.md</div><div class="file-desc">Import, configure, activate, test</div></div></div>
+      <div class="file-row"><div class="file-icon">🔑</div><div><div class="file-name">docs/credential-setup.md</div><div class="file-desc">Secure credential wiring, no secrets in JSON</div></div></div>
+      <div class="file-row"><div class="file-icon">🎛️</div><div><div class="file-name">docs/customization-guide.md</div><div class="file-desc">Vague terms, thresholds, tone, providers</div></div></div>
+      <div class="file-row"><div class="file-icon">🧪</div><div><div class="file-name">docs/testing-guide.md</div><div class="file-desc">7 scenarios with payloads and expected behavior</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section">
+  <div class="cta-glow"></div>
+  <h2>Ready to run it?</h2>
+  <p>Import the workflow, wire your credential, send a spec. Your first ambiguity diagnostic in under 5 minutes.</p>
+  <div class="cta-actions">
+    <a class="btn-primary" id="cta-github-btn" href="https://github.com/saisrikiran25-ctrl/ambuguity" target="_blank" rel="noopener">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      View Repository
+    </a>
+    <a class="btn-secondary" href="https://github.com/saisrikiran25-ctrl/ambuguity/blob/master/workflow/spec-ambiguity-detector.json" target="_blank" rel="noopener">
+      Download Workflow JSON
+    </a>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-left">
+    <div class="nav-logo-dot" style="width:7px;height:7px"></div>
+    <span><strong>Spec Ambiguity Detector</strong> · Day 20 · Public Automation Series · MIT License</span>
+  </div>
+  <div class="footer-right">
+    <a href="https://github.com/saisrikiran25-ctrl/ambuguity" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/saisrikiran25-ctrl/ambuguity/blob/master/README.md" target="_blank" rel="noopener">Docs</a>
+    <a href="https://github.com/saisrikiran25-ctrl/ambuguity/blob/master/workflow/spec-ambiguity-detector.json" target="_blank" rel="noopener">Workflow</a>
+  </div>
+</footer>
+
+<script>
+  // Scroll reveal
+  const reveals = document.querySelectorAll('.reveal');
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.1 });
+  reveals.forEach(el => io.observe(el));
+
+  // Smooth hover on cat cards
+  document.querySelectorAll('.cat-card').forEach(card => {
+    card.addEventListener('mouseenter', () => card.style.transform = 'translateY(-2px)');
+    card.addEventListener('mouseleave', () => card.style.transform = '');
+  });
+</script>
+</body>
+</html>
