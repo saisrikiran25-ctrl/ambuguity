@@ -1,0 +1,692 @@
+{
+  "name": "Spec Ambiguity Detector",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "spec-ambiguity-detector",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "spec-ambiguity-detector-v1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-provider-endpoint",
+              "name": "_debug_provider_endpoint",
+              "value": "https://api.openai.com/v1/chat/completions",
+              "type": "string"
+            },
+            {
+              "id": "field-model-name",
+              "name": "_debug_model_name",
+              "value": "gpt-4o",
+              "type": "string"
+            },
+            {
+              "id": "field-max-tokens",
+              "name": "_debug_max_tokens",
+              "value": 2000,
+              "type": "number"
+            },
+            {
+              "id": "field-temperature",
+              "name": "_debug_temperature",
+              "value": 0.2,
+              "type": "number"
+            },
+            {
+              "id": "field-retry-attempts",
+              "name": "_debug_retry_max_attempts",
+              "value": 2,
+              "type": "number"
+            },
+            {
+              "id": "field-provider-type",
+              "name": "_debug_provider_type",
+              "value": "openai",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-provider-config",
+      "name": "Provider Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Spec Input\n// Transforms raw webhook payload into a consistent internal structure.\n// Handles missing fields, trims text, computes word counts, detects sections.\n\nconst body = $('Webhook').item.json.body || $('Webhook').item.json;\n\nconst userId = body.user_id || 'anonymous';\nconst analysisMode = body.analysis_mode || 'single_spec';\nconst preferredTone = body.preferred_tone || 'direct';\nconst timeWindowStart = body.time_window_start || null;\nconst timeWindowEnd = body.time_window_end || null;\nconst rawSpecs = Array.isArray(body.specs) ? body.specs : [];\n\nif (rawSpecs.length === 0) {\n  throw new Error('No specs provided in payload. Payload must include a non-empty specs array.');\n}\n\nconst KNOWN_SECTION_KEYWORDS = [\n  'overview', 'goals', 'objectives', 'requirements', 'scope', 'assumptions',\n  'open questions', 'out of scope', 'edge cases', 'dependencies', 'metrics',\n  'success criteria', 'acceptance criteria', 'context', 'background',\n  'constraints', 'risks', 'timeline', 'stakeholders', 'glossary', 'appendix'\n];\n\nfunction normalizeSpec(spec, index) {\n  const title = (spec.title || `Untitled Spec ${index + 1}`).trim();\n  const type = (spec.type || 'unknown').toLowerCase().trim();\n  const rawText = (spec.raw_text || '').trim();\n  const sections = Array.isArray(spec.sections) ? spec.sections.map(s => s.toLowerCase().trim()) : [];\n\n  const wordCount = rawText.split(/\\s+/).filter(w => w.length > 0).length;\n  const sentences = rawText.split(/[.!?]+/).filter(s => s.trim().length > 0);\n  const paragraphs = rawText.split(/\\n\\n+/).filter(p => p.trim().length > 0);\n\n  const detectedSections = KNOWN_SECTION_KEYWORDS.filter(keyword =>\n    rawText.toLowerCase().includes(keyword) || sections.includes(keyword)\n  );\n\n  return {\n    _debug_normalized: true,\n    _debug_spec_index: index,\n    title,\n    type,\n    raw_text: rawText,\n    sections,\n    _debug_word_count: wordCount,\n    _debug_sentence_count: sentences.length,\n    _debug_paragraph_count: paragraphs.length,\n    _debug_detected_sections: detectedSections,\n    _debug_section_count: detectedSections.length\n  };\n}\n\nconst normalizedSpecs = rawSpecs.map(normalizeSpec);\n\nreturn {\n  user_id: userId,\n  analysis_mode: analysisMode,\n  preferred_tone: preferredTone,\n  time_window_start: timeWindowStart,\n  time_window_end: timeWindowEnd,\n  normalized_specs: normalizedSpecs,\n  _debug_spec_count: normalizedSpecs.length,\n  _debug_normalization_complete: true,\n  // Carry forward provider config\n  _debug_provider_endpoint: $('Provider Config').item.json._debug_provider_endpoint,\n  _debug_model_name: $('Provider Config').item.json._debug_model_name,\n  _debug_max_tokens: $('Provider Config').item.json._debug_max_tokens,\n  _debug_temperature: $('Provider Config').item.json._debug_temperature,\n  _debug_retry_max_attempts: $('Provider Config').item.json._debug_retry_max_attempts,\n  _debug_provider_type: $('Provider Config').item.json._debug_provider_type\n};\n"
+      },
+      "id": "node-normalize-spec-input",
+      "name": "Normalize Spec Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Structural Signals\n// Scans normalized text for structural signals that inform ambiguity detection\n// without requiring AI. Detects section presence, ownership signals, dependency\n// references, acceptance criteria signals, and document complexity proxies.\n\nconst data = $input.item.json;\nconst specs = data.normalized_specs;\n\nconst OUT_OF_SCOPE_PATTERNS = [\n  /out.of.scope/i, /not in scope/i, /excluded/i, /deferred/i,\n  /not included/i, /won.t include/i, /will not include/i\n];\n\nconst OPEN_QUESTIONS_PATTERNS = [\n  /open.question/i, /tbd/i, /to be determined/i, /to be decided/i,\n  /unresolved/i, /pending decision/i, /needs clarification/i\n];\n\nconst ASSUMPTIONS_PATTERNS = [\n  /assumption/i, /we assume/i, /assuming/i, /it is assumed/i, /presumes/i\n];\n\nconst OWNERSHIP_PATTERNS = [\n  /owned by/i, /responsible for/i, /assigned to/i, /lead[s]? by/i,\n  /[A-Z][a-z]+ team will/i, /[A-Z][a-z]+ squad/i, /[A-Z][a-z]+ will own/i\n];\n\nconst ACCEPTANCE_CRITERIA_PATTERNS = [\n  /acceptance criteria/i, /definition of done/i, /success metric/i,\n  /must achieve/i, /kpi/i, /measur/i, /verif/i, /< \\d+/, />\\s*\\d+\\s*ms/i,\n  /\\d+%/, /p\\d{2}/i, /latency/i, /threshold/i\n];\n\nconst DEPENDENCY_PATTERNS = [\n  /api/i, /third.party/i, /external service/i, /depends on/i,\n  /requires/i, /legal review/i, /design assets/i, /analytics/i,\n  /stakeholder approval/i, /integration with/i\n];\n\nfunction extractSignals(spec) {\n  const text = spec.raw_text;\n  const lowerText = text.toLowerCase();\n\n  const hasOutOfScope = OUT_OF_SCOPE_PATTERNS.some(p => p.test(text));\n  const hasOpenQuestions = OPEN_QUESTIONS_PATTERNS.some(p => p.test(text));\n  const hasAssumptions = ASSUMPTIONS_PATTERNS.some(p => p.test(text));\n  const hasOwnershipSignals = OWNERSHIP_PATTERNS.some(p => p.test(text));\n  const hasAcceptanceCriteriaSignals = ACCEPTANCE_CRITERIA_PATTERNS.some(p => p.test(text));\n  const hasNamedDependencies = DEPENDENCY_PATTERNS.some(p => p.test(text));\n\n  // Extract any text after out-of-scope markers\n  const outOfScopeMatch = text.match(/(?:out.of.scope|not included|deferred)[:\\s]+([^.!?\\n]{10,200})/i);\n  const detectedOutOfScopeItems = outOfScopeMatch ? outOfScopeMatch[1].trim() : 'none detected';\n\n  // Extract any text after open questions markers\n  const openQMatch = text.match(/(?:open.question|tbd|to be determined)[:\\s]+([^.!?\\n]{10,200})/i);\n  const detectedOpenQuestions = openQMatch ? openQMatch[1].trim() : 'none detected';\n\n  const sectionList = spec._debug_detected_sections.join(', ') || 'none detected';\n\n  return {\n    ...spec,\n    _debug_has_out_of_scope_section: hasOutOfScope,\n    _debug_has_open_questions_section: hasOpenQuestions,\n    _debug_has_assumptions_section: hasAssumptions,\n    _debug_has_ownership_signals: hasOwnershipSignals,\n    _debug_has_acceptance_criteria_signals: hasAcceptanceCriteriaSignals,\n    _debug_has_named_dependencies: hasNamedDependencies,\n    _debug_detected_out_of_scope_items: detectedOutOfScopeItems,\n    _debug_detected_open_questions: detectedOpenQuestions,\n    _debug_structural_section_list: sectionList\n  };\n}\n\nconst specsWithSignals = specs.map(extractSignals);\n\nreturn {\n  ...data,\n  normalized_specs: specsWithSignals,\n  _debug_signal_extraction_complete: true\n};\n"
+      },
+      "id": "node-extract-structural-signals",
+      "name": "Extract Structural Signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect Deterministic Ambiguity Flags\n// Rule-based, non-AI ambiguity detection. Operates entirely without AI.\n// Catches high-confidence signal patterns and produces preliminary severity estimates.\n\nconst data = $input.item.json;\nconst specs = data.normalized_specs;\n\n// Configurable vague term vocabulary — extend this list for your team's domain\nconst VAGUE_TERMS = [\n  'fast', 'slow', 'easy', 'hard', 'difficult', 'simple', 'complex',\n  'intuitive', 'robust', 'appropriate', 'seamless', 'support', 'handle',\n  'manage', 'user-friendly', 'efficient', 'scalable', 'reliable', 'better',\n  'improve', 'enhance', 'optimal', 'sufficient', 'adequate', 'reasonable',\n  'significant', 'minimal', 'large', 'small', 'good', 'bad', 'nice',\n  'clean', 'smooth', 'modern', 'natural', 'relevant', 'quickly', 'slowly',\n  'effectively', 'properly', 'correctly', 'appropriately', 'eventually',\n  'performance', 'responsive', 'dynamic', 'flexible', 'intelligent'\n];\n\nfunction detectVagueTerms(text) {\n  const found = [];\n  const lowerText = text.toLowerCase();\n  for (const term of VAGUE_TERMS) {\n    const regex = new RegExp(`\\\\b${term}\\\\b`, 'gi');\n    if (regex.test(lowerText)) {\n      found.push(term);\n    }\n  }\n  return [...new Set(found)];\n}\n\nfunction detectContradictions(text) {\n  const lowerText = text.toLowerCase();\n  const inScopeSignals = [\n    /in scope/i, /included in/i, /will include/i, /will support/i, /in this release/i\n  ];\n  const outScopeSignals = [\n    /out of scope/i, /not included/i, /excluded/i, /deferred/i, /not in this release/i\n  ];\n\n  const hasInScope = inScopeSignals.some(p => p.test(text));\n  const hasOutScope = outScopeSignals.some(p => p.test(text));\n\n  // Basic heuristic: if both in-scope and out-of-scope signals exist for overlapping content\n  if (hasInScope && hasOutScope) {\n    // Check for the same noun appearing in both contexts\n    const subjects = text.match(/(?:will include|in scope)[:\\s]+([\\w\\s]{3,30})/gi) || [];\n    const excluded = text.match(/(?:out of scope|excluded|deferred)[:\\s]+([\\w\\s]{3,30})/gi) || [];\n    if (subjects.length > 0 && excluded.length > 0) {\n      return true;\n    }\n  }\n  return false;\n}\n\nfunction estimatePreSeverity(flags, wordCount) {\n  if (wordCount < 150) return 'low_signal_noise';\n  const count = flags.length;\n  if (count === 0) return 'none';\n  if (count <= 2) return 'low';\n  if (count <= 4) return 'medium';\n  if (count <= 6) return 'high';\n  return 'critical';\n}\n\nfunction detectFlagsForSpec(spec) {\n  const text = spec.raw_text;\n  const flags = [];\n\n  const vagueTermsFound = detectVagueTerms(text);\n  if (vagueTermsFound.length > 0) {\n    flags.push({ flag_type: 'vague_language', matched_terms: vagueTermsFound, confidence: 'high' });\n  }\n\n  if (!spec._debug_has_out_of_scope_section) {\n    flags.push({ flag_type: 'scope_boundary_gap', matched_terms: [], confidence: 'medium' });\n  }\n\n  if (!spec._debug_has_open_questions_section) {\n    flags.push({ flag_type: 'missing_decision_point', matched_terms: [], confidence: 'low' });\n  }\n\n  if (!spec._debug_has_ownership_signals) {\n    flags.push({ flag_type: 'undefined_ownership', matched_terms: [], confidence: 'medium' });\n  }\n\n  if (!spec._debug_has_acceptance_criteria_signals) {\n    flags.push({ flag_type: 'missing_acceptance_criteria', matched_terms: [], confidence: 'medium' });\n  }\n\n  if (!spec._debug_has_named_dependencies && spec._debug_word_count > 200) {\n    flags.push({ flag_type: 'dependency_blind_spot', matched_terms: [], confidence: 'low' });\n  }\n\n  if (detectContradictions(text)) {\n    flags.push({ flag_type: 'contradictory_requirement', matched_terms: [], confidence: 'medium' });\n  }\n\n  const preSeverity = estimatePreSeverity(flags, spec._debug_word_count);\n\n  return {\n    ...spec,\n    _debug_deterministic_flags: flags,\n    _debug_vague_terms_found: vagueTermsFound,\n    _debug_pre_severity_estimate: preSeverity,\n    _debug_flag_count: flags.length\n  };\n}\n\nconst specsWithFlags = specs.map(detectFlagsForSpec);\n\n// Aggregate: determine if any spec is low signal\nconst anyLowSignal = specsWithFlags.some(s => s._debug_pre_severity_estimate === 'low_signal_noise');\nconst allLowSignal = specsWithFlags.every(s => s._debug_pre_severity_estimate === 'low_signal_noise');\n\nreturn {\n  ...data,\n  normalized_specs: specsWithFlags,\n  _debug_any_low_signal: anyLowSignal,\n  _debug_all_low_signal: allLowSignal,\n  _debug_deterministic_detection_complete: true\n};\n"
+      },
+      "id": "node-detect-deterministic-flags",
+      "name": "Detect Deterministic Ambiguity Flags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition-all-low-signal",
+              "leftValue": "={{ $json._debug_all_low_signal }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-validate-signal-strength",
+      "name": "Validate Signal Strength",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-ls-summary",
+              "name": "ambiguity_summary",
+              "value": "={{ 'The submitted document \\'' + $json.normalized_specs[0].title + '\\' contains insufficient content for a full ambiguity diagnostic. The document has approximately ' + $json.normalized_specs[0]._debug_word_count + ' words, which is below the minimum threshold required for reliable pattern detection. A meaningful spec ambiguity analysis requires at minimum 150 words covering the core requirements, scope, and expected outcomes.' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-ls-categories",
+              "name": "ambiguity_categories",
+              "value": "={{ ['low_signal_noise'] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-severity",
+              "name": "severity_level",
+              "value": "low",
+              "type": "string"
+            },
+            {
+              "id": "field-ls-highest-risk",
+              "name": "highest_risk_sections",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-vague-terms",
+              "name": "vague_terms_detected",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-missing-decisions",
+              "name": "missing_decisions",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-ownership-flags",
+              "name": "undefined_ownership_flags",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-non-testable",
+              "name": "non_testable_requirements",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-dep-gaps",
+              "name": "dependency_gaps",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-scope-gaps",
+              "name": "scope_boundary_gaps",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-contradictions",
+              "name": "contradictions_detected",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-assumptions",
+              "name": "assumptions_needing_validation",
+              "value": "={{ [] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-clarifications",
+              "name": "recommended_clarifications",
+              "value": "={{ ['Expand the document to at least 150 words covering: the core problem being solved, the requirements or acceptance criteria, the scope boundaries (what is and is not included), and any dependencies or open questions.'] }}",
+              "type": "array"
+            },
+            {
+              "id": "field-ls-next-step",
+              "name": "recommended_next_step",
+              "value": "Return this document to the author for expansion before requesting analysis — the current content is insufficient for a reliable diagnostic.",
+              "type": "string"
+            },
+            {
+              "id": "field-ls-confidence",
+              "name": "confidence_band",
+              "value": "high",
+              "type": "string"
+            },
+            {
+              "id": "field-ls-needs-review",
+              "name": "needs_human_review",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "field-ls-review-reason",
+              "name": "review_reason",
+              "value": "Document has insufficient content for automated analysis. Human review is required to determine whether this is a draft-in-progress or a complete but inadequate specification.",
+              "type": "string"
+            },
+            {
+              "id": "field-ls-analysis-mode",
+              "name": "analysis_mode",
+              "value": "={{ $json.analysis_mode }}",
+              "type": "string"
+            },
+            {
+              "id": "field-ls-generated-at",
+              "name": "generated_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-low-signal-response",
+      "name": "Low Signal Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1560, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prep Spec Analysis Request\n// Constructs the full prompt payload for the AI analysis call.\n// Merges system prompt with runtime-interpolated user prompt.\n// All structural signal data is embedded as context.\n\nconst data = $input.item.json;\nconst spec = data.normalized_specs[0]; // Process first spec; extend for batch processing\n\nconst SYSTEM_PROMPT = `You are a requirements-quality analyst. Your sole function is to read a product specification, feature brief, PRD, user story set, or implementation document and produce a structured diagnostic identifying ambiguity patterns that could cause delivery risk if left unresolved.\n\nYou are not a writing coach. You are not a summarizer. You are not a spec generator. You diagnose the spec that was written — you do not rewrite it.\n\nYour output must be operational. Every item you surface must be tied to specific language in the input document. You must not invent problems not evidenced by the text.\n\nALLOWED AMBIGUITY CATEGORIES (use exact strings only):\n- vague_language: Terms without measurable criteria (fast, intuitive, robust, seamless, appropriate, support, handle)\n- missing_acceptance_criteria: Requirements with no verifiable success conditions\n- undefined_ownership: No named role, team, squad, or service assigned to a decision or requirement\n- missing_decision_point: Feature direction without documented unresolved choices\n- scope_boundary_gap: No definition of what is excluded, deferred, or out of scope\n- dependency_blind_spot: Quiet reliance on external services, APIs, or approvals without naming them\n- untestable_requirement: Requirements stated as intent or feeling rather than observable behavior\n- contradictory_requirement: Two statements that cannot both be true\n- assumption_without_validation: Unvalidated premises stated as facts\n- low_signal_noise: Document too thin for meaningful analysis (use sparingly — only for genuinely insufficient documents)\n\nSEVERITY RULES:\n- none: No ambiguity detected\n- low: 1-2 minor vague terms or a missing section that is low-risk\n- medium: 3-4 categories, or unclear ownership in 1-2 places\n- high: 5+ categories, or core requirement has no owner, no testable criteria, and conflicting scope\n- critical: Contradictory requirements present, or multiple simultaneous high-severity gaps. Always sets needs_human_review: true.\n\nCONFIDENCE RULES:\n- low: Document is ambiguous enough that you cannot distinguish intentional choices from gaps\n- medium: Most patterns clearly evidenced; one or two involve interpretation\n- high: All patterns clearly evidenced by specific document language\n\nRESPOND WITH A SINGLE VALID JSON OBJECT. No markdown. No code fences. No prose before or after the JSON. Required fields:\n{\n  \"ambiguity_summary\": \"2-5 sentences on ambiguity patterns present and why they create delivery risk\",\n  \"ambiguity_categories\": [\"array of category strings\"],\n  \"severity_level\": \"none|low|medium|high|critical\",\n  \"highest_risk_sections\": [\"section names\"],\n  \"vague_terms_detected\": [\"exact terms from document\"],\n  \"missing_decisions\": [\"specific unresolved decisions\"],\n  \"undefined_ownership_flags\": [\"specific ownership gaps with relevant text\"],\n  \"non_testable_requirements\": [\"specific requirements that cannot be verified\"],\n  \"dependency_gaps\": [\"specific implied dependencies not stated\"],\n  \"scope_boundary_gaps\": [\"specific missing scope boundaries\"],\n  \"contradictions_detected\": [\"specific conflicting statement pairs\"],\n  \"assumptions_needing_validation\": [\"specific unvalidated premises\"],\n  \"recommended_clarifications\": [\"specific actionable items tied to named problems\"],\n  \"recommended_next_step\": \"single sentence — most important action before this spec proceeds\",\n  \"confidence_band\": \"low|medium|high\",\n  \"needs_human_review\": true|false,\n  \"review_reason\": \"string if needs_human_review is true, otherwise null\"\n}\n\nANTI-HALLUCINATION RULES:\n1. Every item in vague_terms_detected must appear verbatim or near-verbatim in the document\n2. Do not diagnose organizational dynamics or infer why gaps exist\n3. Do not pretend unknowns are known\n4. Do not expand scope in recommendations beyond what is implied by the document\n5. Do not summarize the document as your main behavior\n6. Do not produce the corrected or improved version of the document`;\n\nconst sourceSummary = `Document has ${spec._debug_section_count} detected section(s): ${spec._debug_structural_section_list}`;\n\nconst USER_PROMPT = `Analyze the following document for ambiguity patterns.\n\nAnalysis mode: ${data.analysis_mode}\nDocument title: ${spec.title}\nDocument type: ${spec.type}\nSource summary: ${sourceSummary}\nApproximate word count: ${spec._debug_word_count}\nSections detected: ${spec._debug_section_count}\nPreferred output tone: ${data.preferred_tone}\n\n---\n\nSTRUCTURAL SIGNALS (pre-detected by the system before this call):\n\nSections found in document: ${spec._debug_structural_section_list}\nOpen questions already present in document: ${spec._debug_detected_open_questions}\nOut-of-scope items already present in document: ${spec._debug_detected_out_of_scope_items}\n\nPre-detected vague terms (deterministic scan): ${spec._debug_vague_terms_found.join(', ') || 'none'}\nPre-detected ambiguity flags: ${spec._debug_deterministic_flags.map(f => f.flag_type).join(', ') || 'none'}\n\nUse these signals as context. Do not penalize a document for problems it has already acknowledged. Do flag gaps that remain unresolved even in the presence of acknowledged questions.\n\n---\n\nDOCUMENT TEXT:\n\n${spec.raw_text}\n\n---\n\nProduce the structured JSON diagnostic now. Every array field must be present. Return empty arrays where nothing applies. Do not omit fields.`;\n\nlet requestBody;\nif (data._debug_provider_type === 'anthropic') {\n  requestBody = {\n    model: data._debug_model_name,\n    system: SYSTEM_PROMPT,\n    messages: [{ role: 'user', content: USER_PROMPT }],\n    temperature: data._debug_temperature,\n    max_tokens: data._debug_max_tokens\n  };\n} else {\n  // OpenAI-compatible format (default)\n  requestBody = {\n    model: data._debug_model_name,\n    messages: [\n      { role: 'system', content: SYSTEM_PROMPT },\n      { role: 'user', content: USER_PROMPT }\n    ],\n    temperature: data._debug_temperature,\n    max_tokens: data._debug_max_tokens,\n    response_format: { type: 'json_object' }\n  };\n}\n\nreturn {\n  ...data,\n  _debug_ai_request_body: requestBody,\n  _debug_current_spec: spec,\n  _debug_prompt_prep_complete: true\n};\n"
+      },
+      "id": "node-prep-spec-analysis-request",
+      "name": "Prep Spec Analysis Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json._debug_provider_endpoint }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._debug_ai_request_body) }}",
+        "options": {
+          "timeout": 60000,
+          "retry": {
+            "enabled": true,
+            "maxTries": "={{ $json._debug_retry_max_attempts }}",
+            "waitBetweenTries": 2000
+          }
+        }
+      },
+      "id": "node-ai-analyze-spec",
+      "name": "AI: Analyze Spec Ambiguity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 440],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "AI Provider API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Spec Analysis\n// Extracts and validates the AI response.\n// Handles both OpenAI-style and Anthropic-style response shapes.\n// Gracefully handles malformed output.\n\nconst aiResponse = $input.item.json;\nconst previousData = $('Prep Spec Analysis Request').item.json;\n\nconst REQUIRED_FIELDS = [\n  'ambiguity_summary', 'ambiguity_categories', 'severity_level',\n  'highest_risk_sections', 'vague_terms_detected', 'missing_decisions',\n  'undefined_ownership_flags', 'non_testable_requirements', 'dependency_gaps',\n  'scope_boundary_gaps', 'contradictions_detected', 'assumptions_needing_validation',\n  'recommended_clarifications', 'recommended_next_step', 'confidence_band',\n  'needs_human_review', 'review_reason'\n];\n\nconst VALID_SEVERITY = ['none', 'low', 'medium', 'high', 'critical'];\nconst VALID_CONFIDENCE = ['low', 'medium', 'high'];\nconst VALID_CATEGORIES = [\n  'vague_language', 'missing_acceptance_criteria', 'undefined_ownership',\n  'missing_decision_point', 'scope_boundary_gap', 'dependency_blind_spot',\n  'untestable_requirement', 'contradictory_requirement', 'assumption_without_validation',\n  'low_signal_noise'\n];\n\nfunction extractContentString(response) {\n  // OpenAI-style\n  if (response.choices && response.choices[0] && response.choices[0].message) {\n    return response.choices[0].message.content;\n  }\n  // Anthropic-style\n  if (response.content && Array.isArray(response.content) && response.content[0]) {\n    return response.content[0].text;\n  }\n  // Direct content string\n  if (typeof response === 'string') {\n    return response;\n  }\n  return null;\n}\n\nfunction buildFallbackDiagnostic(reason) {\n  return {\n    ambiguity_summary: 'Automated analysis could not be completed. ' + reason + ' Manual review of the specification is required.',\n    ambiguity_categories: [],\n    severity_level: 'medium',\n    highest_risk_sections: [],\n    vague_terms_detected: previousData._debug_current_spec._debug_vague_terms_found || [],\n    missing_decisions: [],\n    undefined_ownership_flags: [],\n    non_testable_requirements: [],\n    dependency_gaps: [],\n    scope_boundary_gaps: [],\n    contradictions_detected: [],\n    assumptions_needing_validation: [],\n    recommended_clarifications: ['Review this specification manually — automated analysis encountered an error during processing.'],\n    recommended_next_step: 'Have a human reviewer analyze this specification before it proceeds to engineering.',\n    confidence_band: 'low',\n    needs_human_review: true,\n    review_reason: reason\n  };\n}\n\nconst contentString = extractContentString(aiResponse);\n\nif (!contentString) {\n  return {\n    ...previousData,\n    _debug_parse_failed: true,\n    _debug_parse_error: 'Could not extract content string from AI response',\n    _debug_raw_ai_response: JSON.stringify(aiResponse).substring(0, 500),\n    parsed_analysis: buildFallbackDiagnostic('Model returned an unrecognizable response format.')\n  };\n}\n\nlet parsed;\ntry {\n  // Strip markdown code fences if present\n  const cleaned = contentString.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  return {\n    ...previousData,\n    _debug_parse_failed: true,\n    _debug_parse_error: 'JSON.parse failed: ' + e.message,\n    _debug_raw_content_string: contentString.substring(0, 500),\n    parsed_analysis: buildFallbackDiagnostic('Model output could not be parsed as valid JSON.')\n  };\n}\n\n// Validate required fields\nconst missingFields = REQUIRED_FIELDS.filter(f => !(f in parsed));\nif (missingFields.length > 0) {\n  // Patch missing fields with safe defaults\n  missingFields.forEach(field => {\n    if (field === 'needs_human_review') parsed[field] = true;\n    else if (field === 'review_reason') parsed[field] = 'Model output was missing required fields: ' + missingFields.join(', ');\n    else if (Array.isArray(parsed[field])) parsed[field] = [];\n    else parsed[field] = '';\n  });\n  parsed._debug_had_missing_fields = true;\n  parsed.needs_human_review = true;\n  parsed.review_reason = `Model output was missing required fields: ${missingFields.join(', ')}`;\n}\n\n// Validate enum values\nif (!VALID_SEVERITY.includes(parsed.severity_level)) {\n  parsed.severity_level = 'medium';\n  parsed._debug_severity_corrected = true;\n}\nif (!VALID_CONFIDENCE.includes(parsed.confidence_band)) {\n  parsed.confidence_band = 'low';\n  parsed._debug_confidence_corrected = true;\n}\n\n// Filter categories to allowed list only\nif (Array.isArray(parsed.ambiguity_categories)) {\n  parsed.ambiguity_categories = parsed.ambiguity_categories.filter(c => VALID_CATEGORIES.includes(c));\n}\n\nreturn {\n  ...previousData,\n  _debug_parse_failed: false,\n  _debug_parse_error: null,\n  parsed_analysis: parsed\n};\n"
+      },
+      "id": "node-parse-spec-analysis",
+      "name": "Parse Spec Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deterministic Quality Checks\n// Post-processes the parsed AI output with deterministic rules.\n// Catches cases where AI output is valid JSON but has quality problems.\n// Also applies severity escalation based on deterministic evidence.\n\nconst data = $input.item.json;\nconst analysis = data.parsed_analysis;\nconst spec = data._debug_current_spec;\n\nconst deterministicFlags = spec._debug_deterministic_flags || [];\nconst vagueTermsFound = spec._debug_vague_terms_found || [];\nconst deterministicFlagCount = deterministicFlags.length;\nconst deterministicCategories = [...new Set(deterministicFlags.map(f => f.flag_type))];\n\n// Cross-check: verify vague_terms_detected against deterministic findings\n// Remove any AI-claimed vague terms that were NOT found deterministically\n// (prevents AI from hallucinating terms that don't exist in the document)\nif (Array.isArray(analysis.vague_terms_detected) && vagueTermsFound.length > 0) {\n  const lowerDoc = spec.raw_text.toLowerCase();\n  analysis.vague_terms_detected = analysis.vague_terms_detected.filter(term => \n    lowerDoc.includes(term.toLowerCase()) || vagueTermsFound.includes(term.toLowerCase())\n  );\n}\n\n// Merge deterministic categories with AI-identified categories\nconst aiCategories = new Set(analysis.ambiguity_categories || []);\nfor (const cat of deterministicCategories) {\n  if (!aiCategories.has(cat)) {\n    // Add deterministically-detected category with medium confidence if missing from AI output\n    const flag = deterministicFlags.find(f => f.flag_type === cat);\n    if (flag && flag.confidence !== 'low') {\n      aiCategories.add(cat);\n    }\n  }\n}\nanalysis.ambiguity_categories = [...aiCategories];\n\n// Severity escalation rules\nlet severity = analysis.severity_level || 'medium';\nconst SEVERITY_ORDER = ['none', 'low', 'medium', 'high', 'critical'];\n\nfunction escalateSeverity(current, target) {\n  const currentIdx = SEVERITY_ORDER.indexOf(current);\n  const targetIdx = SEVERITY_ORDER.indexOf(target);\n  return targetIdx > currentIdx ? target : current;\n}\n\n// Rule: contradictory_requirement always means at least high\nif (analysis.ambiguity_categories.includes('contradictory_requirement')) {\n  severity = escalateSeverity(severity, 'high');\n  analysis.needs_human_review = true;\n  analysis.review_reason = analysis.review_reason || 'Contradictory requirements detected — cannot be resolved through automated analysis. Human judgment required.';\n}\n\n// Rule: critical severity always requires human review\nif (severity === 'critical') {\n  analysis.needs_human_review = true;\n  analysis.review_reason = analysis.review_reason || 'Severity is critical — human review required before this spec proceeds.';\n}\n\n// Rule: if deterministic flags significantly exceed AI-identified categories, flag for review\nconst aiCategoryCount = analysis.ambiguity_categories.length;\nif (deterministicFlagCount > aiCategoryCount + 3) {\n  analysis.needs_human_review = true;\n  analysis.review_reason = analysis.review_reason || `Deterministic checks found ${deterministicFlagCount} flag(s) but AI identified only ${aiCategoryCount} category(ies) — potential underdiagnosis. Human review recommended.`;\n}\n\n// Rule: if recommended_clarifications is empty but categories are non-empty, flag the inconsistency\nif (analysis.ambiguity_categories.length > 0 && \n    (!analysis.recommended_clarifications || analysis.recommended_clarifications.length === 0)) {\n  analysis.recommended_clarifications = ['Review each flagged ambiguity category and request specific clarification from the spec author before proceeding.'];\n  analysis._debug_clarifications_patched = true;\n}\n\n// Rule: if contradictions detected array is empty but contradictory_requirement is a category\nif (analysis.ambiguity_categories.includes('contradictory_requirement') && \n    (!analysis.contradictions_detected || analysis.contradictions_detected.length === 0)) {\n  analysis.contradictions_detected = ['Contradiction detected by structural analysis — review document for conflicting scope or requirement statements.'];\n}\n\nanalysis.severity_level = severity;\n\n// Validate confidence_band given document quality\nif (spec._debug_word_count < 300 && analysis.confidence_band === 'high') {\n  analysis.confidence_band = 'medium';\n  analysis._debug_confidence_downgraded = true;\n  analysis.needs_human_review = true;\n  analysis.review_reason = analysis.review_reason || 'Document is borderline signal — confidence downgraded from high to medium for short documents under 300 words.';\n}\n\n// Add deterministic vague terms if AI missed them\nif (vagueTermsFound.length > 0) {\n  const existing = new Set((analysis.vague_terms_detected || []).map(t => t.toLowerCase()));\n  for (const term of vagueTermsFound) {\n    if (!existing.has(term.toLowerCase())) {\n      analysis.vague_terms_detected = analysis.vague_terms_detected || [];\n      analysis.vague_terms_detected.push(term);\n    }\n  }\n}\n\nreturn {\n  ...data,\n  parsed_analysis: analysis,\n  _debug_quality_checks_complete: true,\n  _debug_post_check_severity: severity,\n  _debug_final_category_count: analysis.ambiguity_categories.length\n};\n"
+      },
+      "id": "node-deterministic-quality-checks",
+      "name": "Deterministic Quality Checks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 440]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition-portfolio-mode",
+              "leftValue": "={{ $json.analysis_mode }}",
+              "rightValue": "portfolio_review",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-human-review-override",
+      "name": "Human Review Override",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [2440, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prep Portfolio Review\n// Collects individual spec analyses and constructs the portfolio-level prompt.\n// Aggregates analysis results, identifies cross-doc patterns, builds prompt context.\n\nconst data = $input.item.json;\nconst allSpecs = data.normalized_specs || [];\nconst primaryAnalysis = data.parsed_analysis;\n\n// In single-pass portfolio mode, primary analysis is the first spec\n// Additional specs would be analyzed in parallel and collected here\n// For this implementation, we use the primary analysis plus spec metadata from all specs\nconst specAnalyses = [\n  {\n    title: data._debug_current_spec.title,\n    type: data._debug_current_spec.type,\n    word_count: data._debug_current_spec._debug_word_count,\n    analysis: primaryAnalysis\n  }\n];\n\n// Add summaries for other specs if available (multi-spec portfolio input)\nif (allSpecs.length > 1) {\n  for (let i = 1; i < allSpecs.length; i++) {\n    const spec = allSpecs[i];\n    specAnalyses.push({\n      title: spec.title,\n      type: spec.type,\n      word_count: spec._debug_word_count,\n      analysis: {\n        ambiguity_summary: 'Not individually analyzed in this run — see raw text for manual review.',\n        ambiguity_categories: spec._debug_deterministic_flags.map(f => f.flag_type),\n        severity_level: spec._debug_pre_severity_estimate,\n        vague_terms_detected: spec._debug_vague_terms_found,\n        needs_human_review: spec._debug_flag_count > 3,\n        confidence_band: 'low'\n      }\n    });\n  }\n}\n\nconst specCount = specAnalyses.length;\nconst highRiskCount = specAnalyses.filter(s => ['high', 'critical'].includes(s.analysis.severity_level)).length;\nconst needsReviewCount = specAnalyses.filter(s => s.analysis.needs_human_review).length;\n\n// Find categories appearing in multiple specs\nconst categoryCounts = {};\nfor (const s of specAnalyses) {\n  for (const cat of (s.analysis.ambiguity_categories || [])) {\n    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;\n  }\n}\nconst repeatedCategories = Object.entries(categoryCounts)\n  .filter(([, count]) => count >= 2)\n  .map(([cat]) => cat);\n\nconst dateRange = data.time_window_start && data.time_window_end\n  ? `${data.time_window_start} to ${data.time_window_end}`\n  : 'not specified';\n\nconst PORTFOLIO_SYSTEM_PROMPT = `You are a requirements-quality analyst conducting a cross-document portfolio review. You have received the individual ambiguity diagnostic results for two or more specification documents. Your task is to identify recurring patterns, systemic gaps, and delivery risk that spans the set.\n\nYou are not re-analyzing individual specs. Identify what they have in common, where risk is concentrated, and what portfolio-level actions the team should take.\n\nFocus on:\n1. Recurring ambiguity categories appearing in multiple specs\n2. Common ownership gaps — same functions consistently unowned\n3. Common missing decisions — same types of decisions consistently deferred\n4. Weak scope discipline — missing out-of-scope sections across the set\n5. Specs at highest delivery risk\n6. Specs requiring rewrite rather than targeted clarification\n\nRespond with a single valid JSON object. No markdown. No code fences. No prose before or after the JSON.\n\nRequired fields:\n{\n  \"review_summary\": \"3-6 sentences on overall quality and portfolio-level delivery risk\",\n  \"top_risk_specs\": [{\"title\": \"exact title\", \"risk_reason\": \"one sentence\"}],\n  \"repeated_ambiguity_categories\": [{\"category\": \"string\", \"occurrence_count\": 0, \"pattern_description\": \"one sentence\"}],\n  \"common_decision_gaps\": [\"types of decisions consistently deferred\"],\n  \"common_ownership_gaps\": [\"types of ownership consistently undefined\"],\n  \"common_acceptance_criteria_failures\": [\"types of requirements consistently lacking criteria\"],\n  \"specs_needing_rewrite\": [{\"title\": \"exact title\", \"reason\": \"one sentence\"}],\n  \"portfolio_recommendations\": [\"portfolio-level actions — not spec-by-spec fixes\"],\n  \"confidence_band\": \"low|medium|high\",\n  \"needs_human_review\": true|false,\n  \"review_reason\": \"string or null\"\n}`;\n\nconst PORTFOLIO_USER_PROMPT = `Conduct a portfolio-level review of the following spec analyses.\n\nPortfolio size: ${specCount} spec(s)\nDate range: ${dateRange}\nPreferred output tone: ${data.preferred_tone}\nSpecs with high or critical severity: ${highRiskCount}\nSpecs flagged for human review: ${needsReviewCount}\nCategories appearing in multiple specs: ${repeatedCategories.join(', ') || 'none identified'}\n\n---\n\nINDIVIDUAL SPEC DIAGNOSTIC RESULTS:\n\n${JSON.stringify(specAnalyses, null, 2)}\n\n---\n\nIdentify cross-document patterns. Only name a pattern as recurring if it appears in at least 2 specs. Produce portfolio-level recommendations — not spec-by-spec fixes.`;\n\nlet portfolioRequestBody;\nif (data._debug_provider_type === 'anthropic') {\n  portfolioRequestBody = {\n    model: data._debug_model_name,\n    system: PORTFOLIO_SYSTEM_PROMPT,\n    messages: [{ role: 'user', content: PORTFOLIO_USER_PROMPT }],\n    temperature: data._debug_temperature,\n    max_tokens: 3000\n  };\n} else {\n  portfolioRequestBody = {\n    model: data._debug_model_name,\n    messages: [\n      { role: 'system', content: PORTFOLIO_SYSTEM_PROMPT },\n      { role: 'user', content: PORTFOLIO_USER_PROMPT }\n    ],\n    temperature: data._debug_temperature,\n    max_tokens: 3000,\n    response_format: { type: 'json_object' }\n  };\n}\n\nreturn {\n  ...data,\n  _debug_portfolio_request_body: portfolioRequestBody,\n  _debug_portfolio_spec_count: specCount,\n  _debug_portfolio_high_risk_count: highRiskCount,\n  _debug_portfolio_repeated_categories: repeatedCategories,\n  _debug_portfolio_prep_complete: true\n};\n"
+      },
+      "id": "node-prep-portfolio-review",
+      "name": "Prep Portfolio Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json._debug_provider_endpoint }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._debug_portfolio_request_body) }}",
+        "options": {
+          "timeout": 90000,
+          "retry": {
+            "enabled": true,
+            "maxTries": "={{ $json._debug_retry_max_attempts }}",
+            "waitBetweenTries": 2000
+          }
+        }
+      },
+      "id": "node-ai-portfolio-review",
+      "name": "AI: Portfolio Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "AI Provider API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Portfolio Review\n// Extracts and validates the portfolio AI response.\n// Same fallback logic as the single-spec parse node.\n\nconst aiResponse = $input.item.json;\nconst previousData = $('Prep Portfolio Review').item.json;\n\nconst REQUIRED_PORTFOLIO_FIELDS = [\n  'review_summary', 'top_risk_specs', 'repeated_ambiguity_categories',\n  'common_decision_gaps', 'common_ownership_gaps', 'common_acceptance_criteria_failures',\n  'specs_needing_rewrite', 'portfolio_recommendations', 'confidence_band',\n  'needs_human_review', 'review_reason'\n];\n\nfunction extractContentString(response) {\n  if (response.choices && response.choices[0] && response.choices[0].message) {\n    return response.choices[0].message.content;\n  }\n  if (response.content && Array.isArray(response.content) && response.content[0]) {\n    return response.content[0].text;\n  }\n  if (typeof response === 'string') return response;\n  return null;\n}\n\nfunction buildFallbackPortfolio(reason) {\n  return {\n    review_summary: 'Portfolio review could not be completed. ' + reason + ' Manual review of the spec set is required.',\n    top_risk_specs: [],\n    repeated_ambiguity_categories: [],\n    common_decision_gaps: [],\n    common_ownership_gaps: [],\n    common_acceptance_criteria_failures: [],\n    specs_needing_rewrite: [],\n    portfolio_recommendations: ['Conduct manual portfolio review — automated analysis encountered an error during processing.'],\n    confidence_band: 'low',\n    needs_human_review: true,\n    review_reason: reason\n  };\n}\n\nconst contentString = extractContentString(aiResponse);\n\nif (!contentString) {\n  return {\n    ...previousData,\n    _debug_portfolio_parse_failed: true,\n    portfolio_analysis: buildFallbackPortfolio('Model returned an unrecognizable response format for portfolio review.')\n  };\n}\n\nlet parsed;\ntry {\n  const cleaned = contentString.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  return {\n    ...previousData,\n    _debug_portfolio_parse_failed: true,\n    portfolio_analysis: buildFallbackPortfolio('Portfolio review model output could not be parsed as valid JSON.')\n  };\n}\n\n// Patch missing fields\nconst missingFields = REQUIRED_PORTFOLIO_FIELDS.filter(f => !(f in parsed));\nif (missingFields.length > 0) {\n  missingFields.forEach(field => {\n    if (field === 'needs_human_review') parsed[field] = true;\n    else if (field === 'review_reason') parsed[field] = 'Missing fields: ' + missingFields.join(', ');\n    else if (['top_risk_specs', 'repeated_ambiguity_categories', 'specs_needing_rewrite'].includes(field)) parsed[field] = [];\n    else if (Array.isArray(parsed[field])) parsed[field] = [];\n    else parsed[field] = '';\n  });\n  parsed.needs_human_review = true;\n}\n\n// Validate confidence below minimum portfolio spec count\nif (previousData._debug_portfolio_spec_count < 3) {\n  parsed.confidence_band = 'low';\n  parsed.needs_human_review = true;\n  parsed.review_reason = parsed.review_reason || `Portfolio review received only ${previousData._debug_portfolio_spec_count} spec(s). Minimum for reliable cross-document analysis is 3.`;\n}\n\nreturn {\n  ...previousData,\n  _debug_portfolio_parse_failed: false,\n  portfolio_analysis: parsed\n};\n"
+      },
+      "id": "node-parse-portfolio-review",
+      "name": "Parse Portfolio Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final Response\n// Constructs the clean, public-facing response by stripping all _debug_ fields.\n// Structures the final JSON from validated, cleaned fields.\n// Adds generated_at timestamp and analysis_mode for caller context.\n\nconst data = $input.item.json;\n\nfunction stripDebugFields(obj) {\n  if (typeof obj !== 'object' || obj === null) return obj;\n  if (Array.isArray(obj)) return obj.map(stripDebugFields);\n  const cleaned = {};\n  for (const [key, value] of Object.entries(obj)) {\n    if (!key.startsWith('_debug_')) {\n      cleaned[key] = stripDebugFields(value);\n    }\n  }\n  return cleaned;\n}\n\nconst isPortfolio = data.analysis_mode === 'portfolio_review' && data.portfolio_analysis;\n\nlet responsePayload;\n\nif (isPortfolio) {\n  // Portfolio mode: return portfolio analysis as primary response\n  const cleanPortfolio = stripDebugFields(data.portfolio_analysis);\n  responsePayload = {\n    analysis_mode: 'portfolio_review',\n    generated_at: new Date().toISOString(),\n    spec_count: data._debug_portfolio_spec_count || 1,\n    ...cleanPortfolio\n  };\n} else {\n  // Single spec mode: return individual analysis\n  const cleanAnalysis = stripDebugFields(data.parsed_analysis);\n  responsePayload = {\n    analysis_mode: data.analysis_mode || 'single_spec',\n    generated_at: new Date().toISOString(),\n    ...cleanAnalysis\n  };\n}\n\nreturn responsePayload;\n"
+      },
+      "id": "node-final-response",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3320, 440]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "X-Analyzer",
+                "value": "spec-ambiguity-detector-v1"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3540, 440]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "X-Analyzer",
+                "value": "spec-ambiguity-detector-v1"
+              },
+              {
+                "name": "X-Short-Circuit",
+                "value": "low-signal"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-respond-low-signal",
+      "name": "Respond to Webhook (Low Signal)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1780, 160]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Provider Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize Spec Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Spec Input": {
+      "main": [
+        [
+          {
+            "node": "Extract Structural Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Structural Signals": {
+      "main": [
+        [
+          {
+            "node": "Detect Deterministic Ambiguity Flags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Deterministic Ambiguity Flags": {
+      "main": [
+        [
+          {
+            "node": "Validate Signal Strength",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Signal Strength": {
+      "main": [
+        [
+          {
+            "node": "Low Signal Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep Spec Analysis Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Low Signal Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook (Low Signal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Spec Analysis Request": {
+      "main": [
+        [
+          {
+            "node": "AI: Analyze Spec Ambiguity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Analyze Spec Ambiguity": {
+      "main": [
+        [
+          {
+            "node": "Parse Spec Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Spec Analysis": {
+      "main": [
+        [
+          {
+            "node": "Deterministic Quality Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deterministic Quality Checks": {
+      "main": [
+        [
+          {
+            "node": "Human Review Override",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Human Review Override": {
+      "main": [
+        [
+          {
+            "node": "Prep Portfolio Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Portfolio Review": {
+      "main": [
+        [
+          {
+            "node": "AI: Portfolio Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Portfolio Review": {
+      "main": [
+        [
+          {
+            "node": "Parse Portfolio Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Portfolio Review": {
+      "main": [
+        [
+          {
+            "node": "Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2026-06-15T00:00:00.000Z",
+      "updatedAt": "2026-06-15T00:00:00.000Z",
+      "id": "tag-spec-ambiguity",
+      "name": "spec-ambiguity-detector"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-15T00:00:00.000Z",
+  "versionId": "spec-ambiguity-detector-v1-0-0"
+}

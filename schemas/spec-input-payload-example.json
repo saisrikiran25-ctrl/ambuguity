@@ -1,0 +1,20 @@
+{
+  "user_id": "pm-team-atlas",
+  "analysis_mode": "single_spec",
+  "time_window_start": "2026-06-01T00:00:00Z",
+  "time_window_end": "2026-06-15T23:59:59Z",
+  "preferred_tone": "direct",
+  "specs": [
+    {
+      "title": "Smart Notification Center — v1 PRD",
+      "type": "prd",
+      "sections": [
+        "overview",
+        "goals",
+        "requirements",
+        "edge_cases"
+      ],
+      "raw_text": "Overview\n\nThe Smart Notification Center will provide users with a centralized surface for all platform alerts, messages, and system events. It replaces the current per-feature alert approach and consolidates all notification types into a single, unified experience.\n\nGoals\n\nThe notification center should surface the right alerts at the right time. It should be fast, intuitive, and easy to dismiss. Users should never feel overwhelmed by notifications. The experience should feel seamless whether the user is on mobile or desktop.\n\nRequirements\n\nThe backend team will handle all notification delivery. The system must support push notifications, in-app banners, and email digests. Notifications must load quickly. The system should be robust enough to handle high volumes during peak usage without degrading the user experience. Edge cases will be supported. The notification UI must be clean and unobtrusive. Users should be able to manage their preferences in a way that feels natural. Notification state (read/unread) will be synchronized appropriately across sessions.\n\nEdge Cases\n\nEdge case behavior will be addressed by the relevant teams during implementation. Failure scenarios for notification delivery will be handled. The system should recover gracefully from errors."
+    }
+  ]
+}

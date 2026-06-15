@@ -1,0 +1,227 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PortfolioReviewOutput",
+  "description": "Structured cross-document portfolio review output returned by the Spec Ambiguity Detector when analysis_mode is portfolio_review. Identifies recurring patterns, systemic gaps, and delivery risk across a set of specification documents.",
+  "type": "object",
+  "required": [
+    "review_summary",
+    "top_risk_specs",
+    "repeated_ambiguity_categories",
+    "common_decision_gaps",
+    "common_ownership_gaps",
+    "common_acceptance_criteria_failures",
+    "specs_needing_rewrite",
+    "portfolio_recommendations",
+    "confidence_band",
+    "needs_human_review",
+    "review_reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "review_summary": {
+      "type": "string",
+      "minLength": 80,
+      "description": "3–6 sentences describing the overall quality of the spec set, the most significant patterns found across documents, and the portfolio-level delivery risk. This is a cross-document synthesis, not a list of individual document summaries.",
+      "examples": [
+        "Of the five specs reviewed, four share recurring undefined ownership patterns — particularly around notification infrastructure, data pipeline responsibilities, and legal review. Missing acceptance criteria appears in all five documents, suggesting a template or process gap rather than individual authoring failure. Two specs contain contradictory scope statements and are flagged for rewrite. The portfolio represents high delivery risk if any of the top three specs proceed to engineering breakdown in their current state."
+      ]
+    },
+    "top_risk_specs": {
+      "type": "array",
+      "description": "Specs from the portfolio that carry the highest individual delivery risk. Ordered by risk, highest first. Based on severity level, ambiguity category count, and presence of ownership or scope contradictions.",
+      "items": {
+        "type": "object",
+        "required": ["title", "risk_reason"],
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Exact title of the spec as provided in the input.",
+            "examples": ["Smart Notification Center — v1 PRD"]
+          },
+          "risk_reason": {
+            "type": "string",
+            "description": "One sentence explaining why this spec represents the highest delivery risk in the portfolio.",
+            "examples": [
+              "This spec has undefined ownership for all three core components, no acceptance criteria for any requirement, and explicitly contradicts itself on whether real-time indexing is in scope."
+            ]
+          }
+        }
+      },
+      "examples": [
+        [
+          {
+            "title": "Smart Notification Center — v1 PRD",
+            "risk_reason": "Undefined ownership for all core components, no testable requirements, and contradictory scope statements make this spec implementation-blocking without immediate rewrite."
+          },
+          {
+            "title": "Data Export Feature — v2 Spec",
+            "risk_reason": "Legal review ownership is undefined, compliance requirements are unresolved, and no out-of-scope section exists to prevent scope expansion during build."
+          }
+        ]
+      ]
+    },
+    "repeated_ambiguity_categories": {
+      "type": "array",
+      "description": "Ambiguity categories that appear in two or more specs in the portfolio. Only categories appearing in at least 2 specs should be included here.",
+      "items": {
+        "type": "object",
+        "required": ["category", "occurrence_count", "pattern_description"],
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "The ambiguity category identifier.",
+            "enum": [
+              "vague_language",
+              "missing_acceptance_criteria",
+              "undefined_ownership",
+              "missing_decision_point",
+              "scope_boundary_gap",
+              "dependency_blind_spot",
+              "untestable_requirement",
+              "contradictory_requirement",
+              "assumption_without_validation",
+              "low_signal_noise"
+            ]
+          },
+          "occurrence_count": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Number of specs in the portfolio where this category was detected."
+          },
+          "pattern_description": {
+            "type": "string",
+            "description": "One sentence describing how this category manifests consistently across the spec set.",
+            "examples": [
+              "All five specs describe notification or alerting behavior without assigning ownership to a specific squad, service, or individual — the pattern suggests a shared infrastructure question that has not been resolved at the team level."
+            ]
+          }
+        }
+      },
+      "examples": [
+        [
+          {
+            "category": "undefined_ownership",
+            "occurrence_count": 4,
+            "pattern_description": "Four of five specs leave notification and data infrastructure ownership unassigned, consistently attributed to 'the backend team' or 'the relevant teams' without naming a specific owner."
+          },
+          {
+            "category": "missing_acceptance_criteria",
+            "occurrence_count": 5,
+            "pattern_description": "All five specs describe desired outcomes without verifiable success conditions — this is a template-level gap, not individual authoring failure."
+          }
+        ]
+      ]
+    },
+    "common_decision_gaps": {
+      "type": "array",
+      "description": "Types of decisions consistently deferred or undefined across multiple specs. Identifies systemic decision avoidance patterns, not individual missed decisions.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "Notification delivery mechanism decisions are deferred in three specs — push vs. in-app vs. email is unresolved at the portfolio level",
+          "Retry and failure handling decisions are absent across all specs that involve asynchronous operations",
+          "Legal and compliance review ownership is consistently not assigned before feature specs reach engineering"
+        ]
+      ]
+    },
+    "common_ownership_gaps": {
+      "type": "array",
+      "description": "Types of ownership consistently undefined across multiple specs. Identifies which functions, systems, or responsibilities are never clearly owned in this spec set.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "Notification infrastructure ownership is undefined across all three notification-related specs — no squad or service is consistently named as the owner",
+          "Data compliance and legal review is consistently listed as a dependency without a named owner in any spec",
+          "Error handling and failure recovery behavior is described in all specs but owned by no named team or service"
+        ]
+      ]
+    },
+    "common_acceptance_criteria_failures": {
+      "type": "array",
+      "description": "Types of requirements that consistently lack acceptance criteria across the spec set. Identifies patterns in what types of behavior are never made verifiable.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "Performance requirements appear in all specs as qualitative statements ('fast', 'responsive', 'low latency') without numeric thresholds in any of them",
+          "User experience requirements are consistently stated as subjective goals ('seamless', 'intuitive', 'natural') without any observable success condition",
+          "Error state behavior is described in general terms across all specs without specifying measurable error rate, recovery time, or user feedback requirements"
+        ]
+      ]
+    },
+    "specs_needing_rewrite": {
+      "type": "array",
+      "description": "Specs where the ambiguity is systemic enough that targeted clarifications will not produce a usable document. A full rewrite is required. Empty if no specs meet this condition.",
+      "items": {
+        "type": "object",
+        "required": ["title", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Exact title of the spec requiring rewrite.",
+            "examples": ["Smart Notification Center — v1 PRD"]
+          },
+          "reason": {
+            "type": "string",
+            "description": "One sentence explaining why targeted clarification is insufficient and a full rewrite is needed.",
+            "examples": [
+              "The spec contains contradictory scope statements in three separate sections, no ownership for any requirement, and a word count insufficient to describe the feature with adequate specificity — clarifications alone will not produce a coherent document."
+            ]
+          }
+        }
+      },
+      "examples": [
+        [
+          {
+            "title": "Search Feature — Q3 Scope Brief",
+            "reason": "The document explicitly contradicts itself on scope in three places and has fewer than 200 words to describe a complex indexing system — targeted clarifications cannot resolve structural contradictions."
+          }
+        ]
+      ]
+    },
+    "portfolio_recommendations": {
+      "type": "array",
+      "description": "Specific, portfolio-level action items focused on process, template, or team-level improvements. These are not spec-by-spec fixes — those are already in the individual analyses. These are systemic interventions.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "examples": [
+        [
+          "Establish a shared ownership model for notification infrastructure before any of the three notification specs proceed to engineering — the recurring ownership gap indicates an unresolved architectural decision at the team level",
+          "Add a mandatory acceptance criteria section to the spec template — all five specs in this portfolio are missing verifiable success conditions, indicating a process gap rather than individual authoring failure",
+          "Require an explicit out-of-scope section in all PRDs and implementation briefs — scope boundary gaps appear in four of five specs, consistently creating ambiguity about what is deferred",
+          "Schedule a cross-functional review session before any of the top-risk specs proceed to sprint planning — the decision gaps identified cannot be resolved by authors working in isolation"
+        ]
+      ]
+    },
+    "confidence_band": {
+      "type": "string",
+      "description": "The diagnostic system's confidence in the accuracy of the portfolio-level pattern analysis. Reflects both the quality of individual input analyses and the number of specs in the portfolio.",
+      "enum": ["low", "medium", "high"],
+      "examples": ["high"]
+    },
+    "needs_human_review": {
+      "type": "boolean",
+      "description": "True when the portfolio review results require human judgment before acting — for example, when fewer than 3 specs were analyzed, when multiple individual analyses had low confidence, or when the portfolio conclusions are ambiguous.",
+      "examples": [false]
+    },
+    "review_reason": {
+      "type": ["string", "null"],
+      "description": "If needs_human_review is true, explains specifically why portfolio-level human review is required. If needs_human_review is false, this field is null.",
+      "examples": [
+        null,
+        "Only 2 specs were provided for portfolio review — the minimum for reliable cross-document pattern analysis is 3. Patterns identified may be coincidental rather than systemic.",
+        "Three of five individual spec analyses returned low confidence — portfolio-level conclusions based on these inputs are unreliable and should not drive process changes without human verification."
+      ]
+    }
+  }
+}

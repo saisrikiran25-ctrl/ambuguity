@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SpecAnalysisOutput",
+  "description": "Structured ambiguity diagnostic output for a single specification document reviewed by the Spec Ambiguity Detector. This schema defines the exact shape of the public-facing response returned by the workflow for single_spec analysis mode.",
+  "type": "object",
+  "required": [
+    "ambiguity_summary",
+    "ambiguity_categories",
+    "severity_level",
+    "highest_risk_sections",
+    "vague_terms_detected",
+    "missing_decisions",
+    "undefined_ownership_flags",
+    "non_testable_requirements",
+    "dependency_gaps",
+    "scope_boundary_gaps",
+    "contradictions_detected",
+    "assumptions_needing_validation",
+    "recommended_clarifications",
+    "recommended_next_step",
+    "confidence_band",
+    "needs_human_review",
+    "review_reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ambiguity_summary": {
+      "type": "string",
+      "minLength": 50,
+      "description": "2–5 sentences describing the ambiguity picture of the document. Describes which categories are present and why they create delivery risk. This is a diagnostic summary, not a document summary.",
+      "examples": [
+        "This document contains four distinct ambiguity patterns across vague language, missing acceptance criteria, undefined ownership, and scope boundary gaps. The terms 'fast', 'intuitive', and 'robust' appear without measurable criteria. Notification delivery ownership is unassigned across three requirements. No acceptance criteria are defined for any stated requirement. The document does not specify which features are excluded from v1 scope."
+      ]
+    },
+    "ambiguity_categories": {
+      "type": "array",
+      "description": "All ambiguity pattern categories detected in the document. May be empty if no ambiguity is detected.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "vague_language",
+          "missing_acceptance_criteria",
+          "undefined_ownership",
+          "missing_decision_point",
+          "scope_boundary_gap",
+          "dependency_blind_spot",
+          "untestable_requirement",
+          "contradictory_requirement",
+          "assumption_without_validation",
+          "low_signal_noise"
+        ]
+      },
+      "uniqueItems": true,
+      "examples": [
+        ["vague_language", "missing_acceptance_criteria", "undefined_ownership", "scope_boundary_gap"]
+      ]
+    },
+    "severity_level": {
+      "type": "string",
+      "description": "Overall severity of ambiguity in the document based on the count and nature of categories detected.",
+      "enum": ["none", "low", "medium", "high", "critical"],
+      "examples": ["high"]
+    },
+    "highest_risk_sections": {
+      "type": "array",
+      "description": "Section names from the document that carry the highest concentration of ambiguity. Empty if no sections are identifiable.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        ["requirements", "edge_cases", "dependencies"]
+      ]
+    },
+    "vague_terms_detected": {
+      "type": "array",
+      "description": "Verbatim or near-verbatim terms detected in the document text that are qualitative, subjective, or unquantified. Every term in this list must appear in the source document.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        ["fast", "intuitive", "seamless", "robust", "high volumes", "easy to use", "appropriate"]
+      ]
+    },
+    "missing_decisions": {
+      "type": "array",
+      "description": "Specific unresolved decisions implied by the document but not recorded. Each item names a distinct decision that must be made before the spec is implementation-ready.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "No decision recorded on notification delivery mechanism (push, email, in-app, or combination)",
+          "No decision on retry behavior or failure handling for failed notification delivery",
+          "No decision on read/unread state persistence — whether this is per-device or account-level"
+        ]
+      ]
+    },
+    "undefined_ownership_flags": {
+      "type": "array",
+      "description": "Specific statements in the document where ownership is unclear, unassigned, or attributed to an abstract actor. Each item names the statement and describes the ownership gap.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "'The backend team will handle delivery' — does not specify which squad, service, or individual owns delivery infrastructure",
+          "'Edge cases will be supported' — no owner assigned for edge case definition or implementation scope"
+        ]
+      ]
+    },
+    "non_testable_requirements": {
+      "type": "array",
+      "description": "Specific requirements from the document that cannot be verified as stated because they lack measurable criteria. Each item quotes or paraphrases the requirement and states what is missing.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "'Notifications must load quickly' — no latency threshold defined. Cannot be tested without a numeric target.",
+          "'Feel seamless across devices' — no device matrix or breakpoint criteria defined. Cannot be tested without a device list.",
+          "'Robust enough to handle high volumes' — no volume threshold or degradation ceiling stated. Cannot be load tested without a target."
+        ]
+      ]
+    },
+    "dependency_gaps": {
+      "type": "array",
+      "description": "Specific dependencies implied by the document but not explicitly named or confirmed. Each item names the implied dependency and explains why it matters.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "Push notification delivery appears to depend on a third-party provider — no provider named, no contract confirmed",
+          "Device compatibility implies a supported device list — no matrix referenced or linked"
+        ]
+      ]
+    },
+    "scope_boundary_gaps": {
+      "type": "array",
+      "description": "Specific scope boundaries that are missing or undefined. Each item describes what is absent — which features, edge cases, or contexts are not clarified as in or out of scope.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "No out-of-scope section or deferred items listed anywhere in the document",
+          "Edge cases referenced in requirements but not enumerated — scope of 'supported edge cases' is undefined"
+        ]
+      ]
+    },
+    "contradictions_detected": {
+      "type": "array",
+      "description": "Specific contradictions found in the document. Each item describes a pair of conflicting statements. Empty if no contradictions are present.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "Section 2 states 'document search is in scope for this release.' Section 4 (out-of-scope) states 'document search is excluded from v1.' These cannot both be true.",
+          "Requirements section states 'real-time indexing will be implemented.' Open questions section states 'real-time indexing is deferred pending infrastructure readiness.' These conflict."
+        ]
+      ]
+    },
+    "assumptions_needing_validation": {
+      "type": "array",
+      "description": "Specific assumptions presented as established facts in the document that have not been validated. Each item names the assumption and explains what validation is needed.",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        [
+          "Assumes users want a centralized notification center rather than per-feature notification surfaces — no user research cited",
+          "Assumes 'high volume' is a likely scenario — no usage data or growth projections referenced"
+        ]
+      ]
+    },
+    "recommended_clarifications": {
+      "type": "array",
+      "description": "Specific, actionable clarification items tied to named ambiguity problems. Each item states exactly what needs to be defined, assigned, or stated and where it should appear in the spec. Never generic.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 0,
+      "examples": [
+        [
+          "Define the exact latency threshold for 'fast' notification loading — specify p95 target in milliseconds under a stated load condition",
+          "Assign explicit ownership for notification delivery infrastructure — name the squad and service responsible, not just 'the backend team'",
+          "List the edge cases in scope for v1 and explicitly exclude the remainder — at minimum: delivery failure behavior, duplicate notification handling, offline state behavior",
+          "Define the device and platform matrix for 'seamless across devices' — specify which OS versions and device types are covered",
+          "State the volume threshold that constitutes 'high volume' and the acceptable degradation ceiling under that load"
+        ]
+      ]
+    },
+    "recommended_next_step": {
+      "type": "string",
+      "description": "Single sentence stating the most important action the author or team should take before this spec proceeds to engineering breakdown.",
+      "examples": [
+        "Return this spec to the author with the five clarification items above before engineering breakdown — the document is not implementation-ready in its current state."
+      ]
+    },
+    "confidence_band": {
+      "type": "string",
+      "description": "The diagnostic system's confidence in the accuracy of this analysis. Reflects certainty about the diagnosis, not the document quality.",
+      "enum": ["low", "medium", "high"],
+      "examples": ["high"]
+    },
+    "needs_human_review": {
+      "type": "boolean",
+      "description": "True when the workflow or AI analysis determined that a human reviewer should inspect this document before proceeding. Triggers include: critical severity, malformed AI output, contradictory signals, low confidence, or very short documents.",
+      "examples": [false]
+    },
+    "review_reason": {
+      "type": ["string", "null"],
+      "description": "If needs_human_review is true, explains specifically why human review is required. If needs_human_review is false, this field is null.",
+      "examples": [null, "Model output could not be parsed as valid JSON. Manual review of the spec is required.", "Contradictory requirements detected that cannot be resolved through automated analysis — human judgment required to determine intended scope."]
+    }
+  }
+}
